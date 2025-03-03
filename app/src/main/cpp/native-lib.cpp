@@ -71,6 +71,9 @@ extern std::string g_android_executable_dir;
 extern std::string g_android_config_dir;
 extern std::string g_android_cache_dir;
 
+std::string g_input_config_override;
+cfg_input_configurations g_cfg_input_configs;
+
 LOG_CHANNEL(rpcs3_android, "ANDROID");
 
 struct LogListener : logs::listener {
@@ -149,9 +152,6 @@ struct GraphicsFrame : GSFrameBase {
   void take_screenshot(const std::vector<u8> sshot_data, u32 sshot_width,
                        u32 sshot_height, bool is_bgra) override {}
 };
-
-std::string g_input_config_override;
-cfg_input_configurations g_cfg_input_configs;
 
 void jit_announce(uptr, usz, std::string_view);
 
@@ -914,17 +914,24 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_surfaceEvent(
   return true;
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_net_rpcs3_RPCS3_usbDeviceEvent(JNIEnv *env, jobject, jint fd, jint event) {
-  rpcs3_android.warning("usb device event %d, %d", fd, event);
+extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_usbDeviceEvent(
+    JNIEnv *env, jobject, jint fd, jint vendorId, jint productId, jint event) {
+  rpcs3_android.warning(
+      "usb device event %d fd: %d, vendorId: %d, productId: %d", event, fd,
+      vendorId, productId);
 
   {
     std::lock_guard lock(g_android_usb_devices_mutex);
 
     if (event == 0) {
-      g_android_usb_devices.push_back(fd);
+      g_android_usb_devices.push_back({
+          .fd = int(fd),
+          .vendorId = u16(vendorId),
+          .productId = u16(productId),
+      });
     } else {
-      if (auto it = std::ranges::find(g_android_usb_devices, fd);
+      auto filter = [fd](auto device) { return device.fd == fd; };
+      if (auto it = std::ranges::find_if(g_android_usb_devices, filter);
           it != g_android_usb_devices.end()) {
         g_android_usb_devices.erase(it);
       }
@@ -932,18 +939,62 @@ Java_net_rpcs3_RPCS3_usbDeviceEvent(JNIEnv *env, jobject, jint fd, jint event) {
   }
 
   {
-    auto list = [](auto handler, std::string name) {
-      rpcs3_android.warning("going to enumerate %s pads", name);
-      handler.Init();
+    auto selectedHandler = g_cfg_input.player1.handler.get();
+    std::string selectedDevice;
+
+    std::map<pad_handler, std::pair<std::unique_ptr<PadHandlerBase>,
+                                    std::vector<std::string>>>
+        handlerToDevices;
+
+    auto collectDevices = [&](auto handler) {
+      handler->Init();
+
+      std::vector<std::string> devices;
+      for (const auto &device : handler->list_devices()) {
+        devices.push_back(device.name);
+      }
+
+      auto type = handler->m_type;
+
+      handlerToDevices[type] = std::pair{
+          std::move(handler),
+          std::move(devices),
+      };
     };
 
-    list(ds3_pad_handler(), "ds3");
-    list(ds4_pad_handler(), "ds4");
-    list(dualsense_pad_handler(), "dualsense");
+    collectDevices(std::make_unique<dualsense_pad_handler>());
+    collectDevices(std::make_unique<ds4_pad_handler>());
+    collectDevices(std::make_unique<ds3_pad_handler>());
+
+    if (handlerToDevices[selectedHandler].second.empty()) {
+      selectedHandler = pad_handler::null;
+    }
+
+    if (!handlerToDevices[pad_handler::dualsense].second.empty()) {
+      selectedHandler = pad_handler::dualsense;
+    } else if (!handlerToDevices[pad_handler::ds4].second.empty()) {
+      selectedHandler = pad_handler::ds4;
+    } else if (!handlerToDevices[pad_handler::ds3].second.empty()) {
+      selectedHandler = pad_handler::ds3;
+    }
+
+    if (selectedHandler != g_cfg_input.player1.handler.get()) {
+      rpcs3_android.warning("install %s pad handler", selectedHandler);
+
+      g_cfg_input.player1.handler.set(selectedHandler);
+
+      if (selectedHandler != pad_handler::null) {
+        g_cfg_input.player1.device.from_string(
+            handlerToDevices[selectedHandler].second.front());
+        handlerToDevices[selectedHandler].first->init_config(&g_cfg_input.player1.config);
+      } else {
+        g_cfg_input.player1.device.from_default();
+      }
+
+      g_cfg_input.save("", g_cfg_input_configs.default_config);
+    }
   }
 
-  // FIXME
-  g_cfg_input.player1.handler.set(pad_handler::dualsense);
   return true;
 }
 

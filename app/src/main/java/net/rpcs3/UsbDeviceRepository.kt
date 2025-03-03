@@ -15,14 +15,19 @@ class UsbDeviceRepository {
 
             val connection = usbManager.openDevice(device)
             devices[device] = connection
-            RPCS3.instance.usbDeviceEvent(connection.fileDescriptor, 0);
+            RPCS3.instance.usbDeviceEvent(
+                connection.fileDescriptor,
+                device.vendorId,
+                device.productId,
+                0
+            )
         }
 
         fun detach(device: UsbDevice) {
             val connection = devices[device]
             if (connection != null) {
-                RPCS3.instance.usbDeviceEvent(connection.fileDescriptor, 1);
-                connection.close();
+                RPCS3.instance.usbDeviceEvent(connection.fileDescriptor, -1, -1, 1)
+                connection.close()
 
                 devices.remove(device)
             }
