@@ -31,8 +31,8 @@ jobs:
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
-          root-reserve-mb: 4096
-          swap-size-mb: 1024
+          root-reserve-mb: 16384
+          swap-size-mb: 4096
           remove-dotnet: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
