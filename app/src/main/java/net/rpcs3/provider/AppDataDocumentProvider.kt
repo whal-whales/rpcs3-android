@@ -49,7 +49,7 @@ class AppDataDocumentProvider : DocumentsProvider() {
 
     private fun context(): Context = context!!
 
-    private fun baseDirectory(): File = context().getExternalFilesDir(null)
+    private fun baseDirectory(): File = context().getExternalFilesDir(null)!!
 
     override fun onCreate(): Boolean = true
 
