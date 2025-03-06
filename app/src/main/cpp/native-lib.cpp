@@ -120,13 +120,46 @@ struct LogListener : logs::listener {
 } static g_androidLogListener;
 
 struct GraphicsFrame : GSFrameBase {
-  static ANativeWindow *getNativeWindow() {
+  mutable ANativeWindow *activeNativeWindow = nullptr;
+  mutable int width = 0;
+  mutable int height = 0;
+
+  ~GraphicsFrame() {
+    if (activeNativeWindow != nullptr) {
+      ANativeWindow_release(activeNativeWindow);
+    }
+  }
+
+  ANativeWindow *getNativeWindow() const {
     ANativeWindow *result;
     while ((result = g_native_window.load()) == nullptr) [[unlikely]] {
+      if (activeNativeWindow != nullptr) {
+        return activeNativeWindow;
+      }
+
+      if (Emu.IsStopped()) {
+        return nullptr;
+      }
+
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+
+    if (result != activeNativeWindow) {
+      ANativeWindow_acquire(result);
+
+      if (activeNativeWindow != nullptr) {
+        ANativeWindow_release(activeNativeWindow);
+      }
+
+      activeNativeWindow = result;
+
+      width = ANativeWindow_getWidth(result);
+      height = ANativeWindow_getHeight(result);
+    }
+
     return result;
   }
+
   void close() override {}
   void reset() override {}
   bool shown() override { return true; }
@@ -138,12 +171,8 @@ struct GraphicsFrame : GSFrameBase {
   draw_context_t make_context() override { return nullptr; }
   void set_current(draw_context_t ctx) override {}
   void flip(draw_context_t ctx, bool skip_frame = false) override {}
-  int client_width() override {
-    return ANativeWindow_getWidth(getNativeWindow());
-  }
-  int client_height() override {
-    return ANativeWindow_getHeight(getNativeWindow());
-  }
+  int client_width() override { return width; }
+  int client_height() override { return height; }
   f64 client_display_rate() override { return 30.f; }
   bool has_alpha() override {
     return ANativeWindow_getFormat(getNativeWindow()) ==
@@ -1069,7 +1098,8 @@ private:
 
         if (std::filesystem::is_regular_file(sfoPath)) {
           const auto psf = psf::load_object(sfoPath);
-          rpcs3_android.warning("title id is %s", psf::get_string(psf, "TITLE_ID"));
+          rpcs3_android.warning("title id is %s",
+                                psf::get_string(psf, "TITLE_ID"));
 
           Emu.SetTitleID(std::string(psf::get_string(psf, "TITLE_ID")));
         } else {
@@ -1107,14 +1137,14 @@ private:
 
     // FIXME: split states
     // if (!is_vsh) {
-      if (_main.analyse(0, _main.elf_entry, _main.seg0_code_end,
-                        _main.applied_patches, std::vector<u32>{})) {
-        Emu.ConfigurePPUCache();
-        Emu.SetTestMode();
-        rpcs3_android.error("Going to precompile main PPU module");
-        ppu_initialize(_main);
-        mod_list.emplace_back(&_main);
-      }
+    if (_main.analyse(0, _main.elf_entry, _main.seg0_code_end,
+                      _main.applied_patches, std::vector<u32>{})) {
+      Emu.ConfigurePPUCache();
+      Emu.SetTestMode();
+      rpcs3_android.error("Going to precompile main PPU module");
+      ppu_initialize(_main);
+      mod_list.emplace_back(&_main);
+    }
     // }
 
     rpcs3_android.error("Going to precompile PPU");
@@ -1374,7 +1404,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_net_rpcs3_RPCS3_surfaceEvent(
     if (prevWindow != nullptr) {
       ANativeWindow_release(prevWindow);
     }
-  } else if (event == 0) {
+  } else {
     auto newWindow = ANativeWindow_fromSurface(env, surface);
 
     if (newWindow == nullptr) {
