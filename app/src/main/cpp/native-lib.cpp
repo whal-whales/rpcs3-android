@@ -774,6 +774,10 @@ struct ProgressMessageDialog : MsgDialogBase {
     });
   }
 
+  jlong getValue() const {
+    return value == max && max != 0 ? value - 1 : value;
+  }
+
   void Close(bool success) override {
     rpcs3_android.warning("ProgressMessageDialog::Close(%s)", success);
     invokeSync([this, success](JNIEnv *env) {
@@ -793,7 +797,7 @@ struct ProgressMessageDialog : MsgDialogBase {
   void SetMsg(const std::string &msg) override {
     rpcs3_android.warning("ProgressMessageDialog::SetMsg(%s)", msg);
     invokeSync([this, msg](JNIEnv *env) {
-      Progress(env, progressId).report(value, max, msg);
+      Progress(env, progressId).report(getValue(), max, msg);
     });
   }
 
@@ -806,7 +810,7 @@ struct ProgressMessageDialog : MsgDialogBase {
     }
 
     invokeSync([this, msg](JNIEnv *env) {
-      Progress(env, progressId).report(value, max, msg);
+      Progress(env, progressId).report(getValue(), max, msg);
     });
   }
 
@@ -834,11 +838,7 @@ struct ProgressMessageDialog : MsgDialogBase {
     value += delta;
 
     invokeSync([this](JNIEnv *env) {
-      auto fixedValue = value;
-      if (fixedValue == max) {
-        fixedValue = max - 1;
-      }
-      Progress(env, progressId).report(fixedValue, max);
+      Progress(env, progressId).report(getValue(), max);
     });
   }
 
@@ -853,11 +853,7 @@ struct ProgressMessageDialog : MsgDialogBase {
     this->value = value;
 
     invokeSync([this](JNIEnv *env) {
-      auto fixedValue = this->value;
-      if (fixedValue == max) {
-        fixedValue = max - 1;
-      }
-      Progress(env, progressId).report(fixedValue, max);
+      Progress(env, progressId).report(getValue(), max);
     });
   }
   void ProgressBarSetLimit(u32 index, u32 limit) override {
@@ -871,11 +867,7 @@ struct ProgressMessageDialog : MsgDialogBase {
     max = limit;
 
     invokeSync([this](JNIEnv *env) {
-      auto fixedValue = this->value;
-      if (fixedValue == max) {
-        fixedValue = max - 1;
-      }
-      Progress(env, progressId).report(fixedValue, max);
+      Progress(env, progressId).report(getValue(), max);
     });
   }
 };
